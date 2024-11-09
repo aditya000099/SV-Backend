@@ -17,7 +17,7 @@ const io = socketIO(server, {
 });
 
 const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/study-platform';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://aditya:aditya123@cluster0.u9tkv.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 // Middleware
