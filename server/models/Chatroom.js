@@ -30,6 +30,10 @@ const chatroomSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
+  image: {
+    type: String,
+    required: false 
+  },
   createdAt: {
     type: Date,
     default: Date.now

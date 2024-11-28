@@ -6,6 +6,8 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const User = require('./models/User');
 const Chatroom = require('./models/Chatroom');
+  // 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
+const Groq = require("groq-sdk");
 
 const app = express();
 const server = http.createServer(app);
@@ -29,12 +31,95 @@ mongoose.connect(MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => console.error('MongoDB connection error:', err));
 
+
+
+
+const groq = new Groq({ apiKey:"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"});
+
+app.post("/api/mcqs", async (req, res) => {
+  try {
+    const { subject, subtopic } = req.body;
+
+    // Validate request input
+    if (!subject || !subtopic) {
+      return res.status(400).send("Both subject and subtopic are required.");
+    }
+
+    // Fetch MCQs using LLM
+    const chatCompletion = await getGroqChatCompletion({ subject, subtopic });
+
+    // Extract MCQs from the response
+    const mcqs = parseMCQs(chatCompletion.choices[0]?.message?.content || "");
+
+    // Respond with the MCQs
+    res.json(mcqs);
+  } catch (error) {
+    console.error("Error generating MCQs:", error);
+    res.status(500).send("An error occurred while generating MCQs.");
+  }
+});
+
+// Helper function to call LLM for MCQ generation
+async function getGroqChatCompletion({ subject, subtopic }) {
+  return groq.chat.completions.create({
+    messages: [
+      {
+        role: "user",
+        content: `
+        Generate 10 multiple-choice questions (MCQs) for the subject "${subject}" and subtopic "${subtopic}". 
+        Format them as:
+        Question: [question text]
+        Options:
+        a. [option 1]
+        b. [option 2]
+        c. [option 3]
+        d. [option 4]
+        Correct Answer: [correct option]
+        Respond only in this format without any extra text or greetings.
+        `,
+      },
+    ],
+    model: "llama3-8b-8192",
+  });
+}
+
+// Helper function to parse MCQs from the LLM response
+function parseMCQs(rawText) {
+  const mcqs = [];
+  const questions = rawText.split("Question: ").slice(1);
+
+  questions.forEach((q) => {
+    const [question, optionsAndAnswer] = q.split("Options:");
+    const [optionsText, correctAnswerLine] = optionsAndAnswer.split("Correct Answer:");
+    const correctAnswer = correctAnswerLine.trim();
+    const options = {};
+
+    optionsText
+      .trim()
+      .split("\n")
+      .forEach((line) => {
+        const [key, value] = line.split(". ");
+        options[key.trim()] = value.trim();
+      });
+
+    mcqs.push({
+      question: question.trim(),
+      options,
+      correctAnswer,
+    });
+  });
+
+  return mcqs;
+}
+app.use('/api/study-time', require('./routes/studyTime')); 
 // Authentication Routes
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
     const user = await User.create({ name, email, password });
-    const token = jwt.sign({ userId: user._id }, JWT_SECRET);
+    const token = jwt.sign({ userId: user._id },
+      JWT_SECRET,
+      { expiresIn: '30d' });
     res.status(201).json({ token, user: { id: user._id, name: user.name, email: user.email } });
   } catch (error) {
     res.status(400).json({ error: error.message });
