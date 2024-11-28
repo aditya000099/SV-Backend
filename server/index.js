@@ -8,6 +8,8 @@ const User = require('./models/User');
 const Chatroom = require('./models/Chatroom');
   // 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
 const Groq = require("groq-sdk");
+const QuestionsModel = require("./models/QuestionsModel");
+const router = express.Router();
 
 const app = express();
 const server = http.createServer(app);
@@ -123,6 +125,85 @@ app.post('/api/register', async (req, res) => {
     res.status(201).json({ token, user: { id: user._id, name: user.name, email: user.email } });
   } catch (error) {
     res.status(400).json({ error: error.message });
+  }
+});
+
+// Endpoint to save MCQs
+app.post('/api/mcqs/save', async (req, res) => {
+  try {
+    const { userId, subject, subtopic, questions, score } = req.body;
+
+    // Check for missing required fields and return detailed error messages
+    if (!userId || !subject || !subtopic || !questions || score === undefined) {
+      return res.status(400).json({ 
+        message: 'Missing required fields.',
+        missingFields: { userId, subject, subtopic, questions, score } // Log which fields are missing
+      });
+    }
+
+    // Create and save the new entry
+    const newEntry = new QuestionsModel({
+      userId,
+      subject,
+      subtopic,
+      questions,
+      score,
+    });
+
+    await newEntry.save();
+    res.status(201).json({ message: 'Questions saved successfully.' });
+  } catch (error) {
+    console.error('Error saving questions:', error.message);
+    console.error(error); // Log the full error for debugging
+    res.status(500).json({ message: 'Internal Server Error.', error: error.message });
+  }
+});
+
+// app.get('/api/mcqs/history', async (req, res) => {
+//   const { userId } = req.query;
+
+//   // Validate the query parameters
+//   if (!userId) {
+//     return res.status(400).json({ message: "User IDis required." });
+//   }
+
+//   try {
+//     // Query the database to find questions based on subject and subtopic
+//     const questions = await QuestionsModel.find({ userId });
+
+//     if (questions.length === 0) {
+//       return res.status(404).json({ message: "No questions found for the given subject and subtopic." });
+//     }
+
+//     // Return the questions if found
+//     res.status(200).json(questions);
+//   } catch (error) {
+//     console.error("Error fetching MCQs:", error);
+//     res.status(500).json({ message: "Internal Server Error", error: error.message });
+//   }
+// });
+
+app.post('/api/mcqs/history', async (req, res) => {
+  const { userId } = req.body; // Get userId from the request body
+
+  // Validate the body to ensure userId is provided
+  if (!userId) {
+    return res.status(400).json({ message: "User ID is required." });
+  }
+
+  try {
+    // Query the database to find questions based on userId
+    const questions = await QuestionsModel.find({ userId });
+
+    if (questions.length === 0) {
+      return res.status(404).json({ message: "No questions found for the given user." });
+    }
+
+    // Return the questions if found
+    res.status(200).json(questions);
+  } catch (error) {
+    console.error("Error fetching MCQs:", error);
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 });
 

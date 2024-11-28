@@ -17,6 +17,7 @@ const userSchema = new mongoose.Schema({
     date: { type: Date },
     hours: { type: Number }
   }],
+  questions: { type: Array },
   planner: [plannerTaskSchema],
   createdAt: { type: Date, default: Date.now }
 });
