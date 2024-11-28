@@ -178,11 +178,13 @@ app.get('/api/chatrooms', async (req, res) => {
 app.post('/api/chatrooms', async (req, res) => {
   try {
     const { name } = req.body;
+    const { image } = req.body;
     const token = req.headers.authorization?.split(' ')[1];
     const decoded = jwt.verify(token, JWT_SECRET);
     
     const chatroom = new Chatroom({
       name,
+      image,
       creator: decoded.userId,
       participants: [decoded.userId]
     });
