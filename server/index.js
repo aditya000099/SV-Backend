@@ -9,6 +9,7 @@ const Chatroom = require('./models/Chatroom');
   // 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
 const Groq = require("groq-sdk");
 const QuestionsModel = require("./models/QuestionsModel");
+const Goal = require("./models/Goal");
 const router = express.Router();
 
 const app = express();
@@ -84,6 +85,78 @@ async function getGroqChatCompletion({ subject, subtopic }) {
     model: "llama3-8b-8192",
   });
 }
+
+async function getGroqChatCompletionGoal({ previousResponses }) {
+  // Validate input
+  if (!Array.isArray(previousResponses)) {
+    throw new Error("Invalid input: 'previousResponses' must be an array.");
+  }
+
+  previousResponses.forEach((response, index) => {
+    if (typeof response !== "string") {
+      throw new Error(`Invalid input at index ${index}: Each response must be a string.`);
+    }
+  });
+
+  // Prepare conversation context
+  const messages = [
+    {
+      role: "system",
+      content: "You are an educational bot that helps users plan their learning journey by asking personalized questions.",
+    },
+  ];
+
+  if (previousResponses.length === 0) {
+    // First question
+    messages.push({
+      role: "assistant",
+      content: "What's your main learning goal?",
+    });
+  } else {
+    // Add user responses to conversation history
+    previousResponses.forEach((response, index) => {
+      messages.push({
+        role: "user",
+        content: response,
+      });
+
+      // Optionally add assistant's acknowledgment for previous responses
+      if (index < previousResponses.length - 1) {
+        messages.push({
+          role: "assistant",
+          content: `Thank you for your response to question ${index + 1}.`,
+        });
+      }
+    });
+
+    // Generate the next question based on the last response
+    const lastResponse = previousResponses[previousResponses.length - 1];
+    messages.push({
+      role: "assistant",
+      content: `Based on your response, "${lastResponse}", here's the next question:`,
+    });
+  }
+
+  try {
+    // Call Groq API
+    const completion = await groq.chat.completions.create({
+      messages,
+      model: "llama3-8b-8192",
+    });
+
+    // Extract the last AI-generated message
+    const aiResponse = completion.messages[completion.messages.length - 1];
+    return {
+      question: aiResponse.content,
+      complete: previousResponses.length >= 4, // Mark complete after 5 questions
+    };
+  } catch (error) {
+    console.error("Error generating question with Groq API:", error);
+    throw new Error("Failed to generate question using Groq AI.");
+  }
+}
+
+
 
 // Helper function to parse MCQs from the LLM response
 function parseMCQs(rawText) {
@@ -204,6 +277,185 @@ app.post('/api/mcqs/history', async (req, res) => {
   } catch (error) {
     console.error("Error fetching MCQs:", error);
     res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+});
+
+// app.post('/api/bot/question', async (req, res) => {
+//   try {
+//     // Example of a static first question
+//     const firstQuestion = "What is your primary goal or area of interest?";
+
+//     // Send the question as a response
+//     res.status(200).json({ question: firstQuestion });
+//   } catch (error) {
+//     console.error("Error fetching the first question:", error);
+//     res.status(500).json({ error: "Failed to get the first question." });
+//   }
+// });
+
+// app.post('/api/bot/question', async (req, res) => {
+//   try {
+//     const { previousResponses } = req.body;
+
+//     // Get AI-generated question
+//     const { question, complete } = await getGroqChatCompletionGoal({ previousResponses });
+
+//     res.json({ question, complete });
+//   } catch (error) {
+//     console.error("Error in /api/bot/question route:", error);
+//     res.status(500).json({ error: "Failed to generate AI-driven question." });
+//   }
+// });
+
+
+//new code   
+
+const generateNextQuestion = (responses) => {
+  // Example logic: Adjust based on collected responses
+  if (responses.length === 0) {
+    return "What is your primary learning goal?";
+  } else if (responses.length === 1) {
+    return "How much time can you dedicate daily?";
+  } else if (responses.length === 2) {
+    return "What resources do you have access to (books, internet, mentors)?";
+  }
+  return null; // End of questioning
+};
+
+app.post('/api/bot/question', (req, res) => {
+  const { previousResponses } = req.body;
+
+  // Generate next question
+  const nextQuestion = generateNextQuestion(previousResponses);
+
+  if (nextQuestion) {
+    return res.json({ question: nextQuestion, complete: false });
+  }
+
+  // If no more questions, mark as complete
+  return res.json({ complete: true });
+});
+
+app.post('/api/bot/generate-roadmap', (req, res) => {
+  const { responses, userId } = req.body;
+
+  // Use responses to create a roadmap
+  const roadmap = {
+    mainGoal: responses[0]?.answer || "Undefined Goal",
+    timeline: "3 months",
+    minimumTime: responses[1]?.answer || "30 minutes daily",
+    milestones: [
+      "Complete foundational concepts",
+      "Build a small project",
+      "Master advanced topics",
+    ],
+    resources: [
+      { title: "FreeCodeCamp", url: "https://freecodecamp.org" },
+      { title: "Khan Academy", url: "https://khanacademy.org" },
+    ],
+  };
+
+  // Save roadmap logic here (e.g., database save)
+
+  res.json(roadmap);
+});
+//till here
+
+app.get('/api/goals/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  if (!userId) {
+    return res.status(400).json({ message: 'User ID is required.' });
+  }
+
+  try {
+    const goal = await Goal.findOne({ userId });
+    if (!goal) {
+      return res.status(404).json({ message: 'No goal found for the user.' });
+    }
+    res.status(200).json(goal);
+  } catch (error) {
+    console.error('Error fetching goal:', error);
+    res.status(500).json({ message: 'Internal Server Error', error: error.message });
+  }
+});
+
+// Route to create a new goal
+app.post('/api/goals', async (req, res) => {
+  const { userId, goal, isCompleted, progress } = req.body;
+
+  if (!userId || !goal) {
+    return res.status(400).json({ message: 'User ID and goal are required.' });
+  }
+
+  try {
+    const newGoal = new Goal({
+      userId,
+      goal,
+      isCompleted: isCompleted || false,
+      progress: progress || 0,
+    });
+
+    await newGoal.save();
+    res.status(201).json({ message: 'Goal created successfully.', goal: newGoal });
+  } catch (error) {
+    console.error('Error creating goal:', error);
+    res.status(500).json({ message: 'Internal Server Error', error: error.message });
+  }
+});
+
+// Route to update progress or mark goal as complete
+app.patch('/api/goals/:userId', async (req, res) => {
+  const { userId } = req.params;
+  const { progress, isCompleted, updatedAt } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ message: 'User ID is required.' });
+  }
+
+  try {
+    const updatedGoal = await Goal.findOneAndUpdate(
+      { userId },
+      {
+        $set: {
+          ...(progress !== undefined && { progress }),
+          ...(isCompleted !== undefined && { isCompleted }),
+          updatedAt: updatedAt || new Date(),
+        },
+      },
+      { new: true }
+    );
+
+    if (!updatedGoal) {
+      return res.status(404).json({ message: 'Goal not found for the user.' });
+    }
+
+    res.status(200).json({ message: 'Goal updated successfully.', goal: updatedGoal });
+  } catch (error) {
+    console.error('Error updating goal:', error);
+    res.status(500).json({ message: 'Internal Server Error', error: error.message });
+  }
+});
+
+// Route to delete a user's goal (optional)
+app.delete('/api/goals/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  if (!userId) {
+    return res.status(400).json({ message: 'User ID is required.' });
+  }
+
+  try {
+    const deletedGoal = await Goal.findOneAndDelete({ userId });
+
+    if (!deletedGoal) {
+      return res.status(404).json({ message: 'No goal found to delete.' });
+    }
+
+    res.status(200).json({ message: 'Goal deleted successfully.' });
+  } catch (error) {
+    console.error('Error deleting goal:', error);
+    res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 });
 
