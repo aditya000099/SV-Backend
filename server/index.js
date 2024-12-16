@@ -6,11 +6,16 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const User = require('./models/User');
 const Chatroom = require('./models/Chatroom');
+const Roadmap = require('./models/Roadmap');
   // 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
 const Groq = require("groq-sdk");
 const QuestionsModel = require("./models/QuestionsModel");
 const Goal = require("./models/Goal");
 const router = express.Router();
+const { connectDB } = require('./config/database');
+const { getGroqChatCompletion, getGroqChatCompletionGoal, generateRoadmap } = require('./services/groqService');
+
+connectDB();
 
 const app = express();
 const server = http.createServer(app);
@@ -22,22 +27,11 @@ const io = socketIO(server, {
 });
 
 const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://aditya:aditya123@cluster0.u9tkv.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-
-// MongoDB Connection
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('MongoDB connection error:', err));
-
-
-
-
-const groq = new Groq({ apiKey:"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"});
 
 app.post("/api/mcqs", async (req, res) => {
   try {
@@ -61,102 +55,6 @@ app.post("/api/mcqs", async (req, res) => {
     res.status(500).send("An error occurred while generating MCQs.");
   }
 });
-
-// Helper function to call LLM for MCQ generation
-async function getGroqChatCompletion({ subject, subtopic }) {
-  return groq.chat.completions.create({
-    messages: [
-      {
-        role: "user",
-        content: `
-        Generate 10 multiple-choice questions (MCQs) for the subject "${subject}" and subtopic "${subtopic}". 
-        Format them as:
-        Question: [question text]
-        Options:
-        a. [option 1]
-        b. [option 2]
-        c. [option 3]
-        d. [option 4]
-        Correct Answer: [correct option]
-        Respond only in this format without any extra text or greetings.
-        `,
-      },
-    ],
-    model: "llama3-8b-8192",
-  });
-}
-
-async function getGroqChatCompletionGoal({ previousResponses }) {
-  // Validate input
-  if (!Array.isArray(previousResponses)) {
-    throw new Error("Invalid input: 'previousResponses' must be an array.");
-  }
-
-  previousResponses.forEach((response, index) => {
-    if (typeof response !== "string") {
-      throw new Error(`Invalid input at index ${index}: Each response must be a string.`);
-    }
-  });
-
-  // Prepare conversation context
-  const messages = [
-    {
-      role: "system",
-      content: "You are an educational bot that helps users plan their learning journey by asking personalized questions.",
-    },
-  ];
-
-  if (previousResponses.length === 0) {
-    // First question
-    messages.push({
-      role: "assistant",
-      content: "What's your main learning goal?",
-    });
-  } else {
-    // Add user responses to conversation history
-    previousResponses.forEach((response, index) => {
-      messages.push({
-        role: "user",
-        content: response,
-      });
-
-      // Optionally add assistant's acknowledgment for previous responses
-      if (index < previousResponses.length - 1) {
-        messages.push({
-          role: "assistant",
-          content: `Thank you for your response to question ${index + 1}.`,
-        });
-      }
-    });
-
-    // Generate the next question based on the last response
-    const lastResponse = previousResponses[previousResponses.length - 1];
-    messages.push({
-      role: "assistant",
-      content: `Based on your response, "${lastResponse}", here's the next question:`,
-    });
-  }
-
-  try {
-    // Call Groq API
-    const completion = await groq.chat.completions.create({
-      messages,
-      model: "llama3-8b-8192",
-    });
-
-    // Extract the last AI-generated message
-    const aiResponse = completion.messages[completion.messages.length - 1];
-    return {
-      question: aiResponse.content,
-      complete: previousResponses.length >= 4, // Mark complete after 5 questions
-    };
-  } catch (error) {
-    console.error("Error generating question with Groq API:", error);
-    throw new Error("Failed to generate question using Groq AI.");
-  }
-}
-
-
 
 // Helper function to parse MCQs from the LLM response
 function parseMCQs(rawText) {
@@ -200,6 +98,41 @@ app.post('/api/register', async (req, res) => {
     res.status(400).json({ error: error.message });
   }
 });
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+    if (!user || !(await user.comparePassword(password))) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const token = jwt.sign(
+      {
+        userId: user._id,
+        email: user.email,
+        name: user.name,
+        role: user.role || 'user',
+      },
+      JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+
+    res.json({
+      token,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role || 'user',
+        bio: user.bio || ''
+      }
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 
 // Endpoint to save MCQs
 app.post('/api/mcqs/save', async (req, res) => {
@@ -459,39 +392,6 @@ app.delete('/api/goals/:userId', async (req, res) => {
   }
 });
 
-app.post('/api/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const user = await User.findOne({ email });
-    if (!user || !(await user.comparePassword(password))) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const token = jwt.sign(
-      {
-        userId: user._id,
-        email: user.email,
-        name: user.name,
-        role: user.role || 'user',
-      },
-      JWT_SECRET,
-      { expiresIn: '30d' }
-    );
-
-    res.json({
-      token,
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role || 'user',
-        bio: user.bio || ''
-      }
-    });
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
 
 // Add these routes after your existing routes
 
@@ -800,6 +700,118 @@ io.on("connection", (socket) => {
       console.error('Error leaving room:', error);
     }
   });
+});
+
+// Generate and save roadmap
+app.post('/api/roadmap/generate', async (req, res) => {
+  try {
+    const { userId, goal, duration } = req.body;
+
+      if (!userId || !goal || !duration) {
+      return res.status(400).json({ 
+        message: 'User ID, goal, and duration are required.' 
+      });
+    }
+
+    // Generate roadmap using Groq
+    const roadmapData = await generateRoadmap(goal, duration);
+
+    // Create new roadmap document
+    const roadmap = new Roadmap({
+      userId,
+      goal,
+      duration,
+      basics: roadmapData.basics,
+      learningPath: roadmapData.learningPath,
+      resources: roadmapData.resources
+    });
+
+    await roadmap.save();
+    res.status(201).json(roadmap);
+  } catch (error) {
+    console.error('Error generating roadmap:', error);
+    res.status(500).json({ 
+      message: 'Error generating roadmap', 
+      error: error.message 
+    });
+  }
+});
+
+// Get user's roadmaps
+app.get('/api/roadmap/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const roadmaps = await Roadmap.find({ userId });
+    res.json(roadmaps);
+  } catch (error) {
+    res.status(500).json({ 
+      message: 'Error fetching roadmaps', 
+      error: error.message 
+    });
+  }
+});
+
+// Get specific roadmap
+app.get('/api/roadmap/detail/:roadmapId', async (req, res) => {
+  try {
+    const { roadmapId } = req.params;
+    const roadmap = await Roadmap.findById(roadmapId);
+    
+    if (!roadmap) {
+      return res.status(404).json({ message: 'Roadmap not found' });
+    }
+    
+    res.json(roadmap);
+  } catch (error) {
+    res.status(500).json({ 
+      message: 'Error fetching roadmap', 
+      error: error.message 
+    });
+  }
+});
+
+// Update roadmap
+app.put('/api/roadmap/:roadmapId', async (req, res) => {
+  try {
+    const { roadmapId } = req.params;
+    const updates = req.body;
+    
+    const roadmap = await Roadmap.findByIdAndUpdate(
+      roadmapId,
+      { ...updates, updatedAt: Date.now() },
+      { new: true }
+    );
+    
+    if (!roadmap) {
+      return res.status(404).json({ message: 'Roadmap not found' });
+    }
+    
+    res.json(roadmap);
+  } catch (error) {
+    res.status(500).json({ 
+      message: 'Error updating roadmap', 
+      error: error.message 
+    });
+  }
+});
+
+// Delete roadmap
+app.delete('/api/roadmap/:roadmapId', async (req, res) => {
+  try {
+    const { roadmapId } = req.params;
+    const roadmap = await Roadmap.findByIdAndDelete(roadmapId);
+    
+    if (!roadmap) {
+      return res.status(404).json({ message: 'Roadmap not found' });
+    }
+    
+    res.json({ message: 'Roadmap deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ 
+      message: 'Error deleting roadmap', 
+      error: error.message 
+    });
+  }
 });
 
 server.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
