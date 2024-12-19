@@ -14,7 +14,7 @@ const Goal = require("./models/Goal");
 const router = express.Router();
 const { connectDB } = require('./config/database');
 const { getGroqChatCompletion, getGroqChatCompletionGoal, generateRoadmap } = require('./services/groqService');
-
+const auth = require('./middleware/auth');
 connectDB();
 
 const app = express();
@@ -811,6 +811,67 @@ app.delete('/api/roadmap/:roadmapId', async (req, res) => {
       message: 'Error deleting roadmap', 
       error: error.message 
     });
+  }
+});
+app.get('/api/users/me', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    res.json(user);
+  } catch (error) {
+    console.error('Error fetching user data:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+app.get('/api/users/:userId', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId)
+      .select('name email loginDates'); // Only select needed fields
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json(user);
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+// Add this endpoint after your other routes
+app.post('/api/track-login', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is required' });
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Set to beginning of day for accurate comparison
+
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Check if user has already logged in today
+    const hasLoggedInToday = user.loginDates.some(date => {
+      const loginDate = new Date(date);
+      loginDate.setHours(0, 0, 0, 0);
+      return loginDate.getTime() === today.getTime();
+    });
+
+    // If user hasn't logged in today, add today's date
+    if (!hasLoggedInToday) {
+      user.loginDates.push(today);
+      await user.save();
+    }
+
+    res.json({ success: true, loginDates: user.loginDates });
+  } catch (error) {
+    console.error('Error tracking login:', error);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
