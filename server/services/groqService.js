@@ -1,4 +1,7 @@
 const Groq = require("groq-sdk");
+const dotenv = require('dotenv');
+dotenv.config();
+
 
 const groq = new Groq({
   apiKey: "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",
@@ -98,7 +101,7 @@ async function getGroqChatCompletionGoal({ previousResponses }) {
 
 async function generateRoadmap(goal, duration) {
   const groq = new Groq({
-    apiKey: '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'
+    apiKey: process.env.GROQ_API_KEY
   });
 
   const prompt = `Generate a learning roadmap for the goal: "${goal}" with duration "${duration}".
