@@ -4,7 +4,7 @@ dotenv.config();
 
 
 const groq = new Groq({
-  apiKey: "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",
+  apiKey: process.env.GROQ_API_KEY,
 });
 
 async function getGroqChatCompletion({ subject, subtopic }) {
